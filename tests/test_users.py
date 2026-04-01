@@ -1,11 +1,19 @@
+"""
+User endpoint tests.
+
+Tests for:
+- GET /api/v1/users/me/profile
+- PUT /api/v1/users/me/profile
+- GET /api/v1/users/me/roles
+"""
 import pytest
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from main import app
 from app.core.database import Base, get_db
+from main import app
 
-TEST_DB_URL = "sqlite+aiosqlite:///./test.db"
+TEST_DB_URL = "sqlite+aiosqlite:///./test_users.db"
 
 test_engine = create_async_engine(TEST_DB_URL, echo=False)
 TestSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
@@ -39,73 +47,69 @@ async def client():
 
 
 @pytest.fixture
-async def created_user(client):
-    response = await client.post("/api/v1/users/", json={
-        "email": "test@example.com",
-        "password": "password123"
-    })
-    return response.json()
+async def authenticated_user(client):
+    """Register and login a test user."""
+    await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "user@example.com",
+            "password": "password123",
+            "confirm_password": "password123",
+        },
+    )
+    
+    login_response = await client.post(
+        "/api/v1/auth/login",
+        data={"username": "user@example.com", "password": "password123"},
+    )
+    return login_response.json()["access_token"]
 
 
-async def test_root(client):
-    r = await client.get("/")
-    assert r.status_code == 200
-    assert r.json()["status"] == "ok"
+@pytest.mark.asyncio
+async def test_get_profile_requires_auth(client):
+    response = await client.get("/api/v1/users/me/profile")
+    assert response.status_code == 401
 
 
-async def test_create_user(client):
-    r = await client.post("/api/v1/users/", json={
-        "email": "new@example.com",
-        "password": "password123"
-    })
-    assert r.status_code == 201
-    data = r.json()
-    assert data["email"] == "new@example.com"
-    assert "password_hash" not in data
-    assert "role" in data
-    assert "status" in data
+@pytest.mark.asyncio
+async def test_get_current_user_profile(client, authenticated_user):
+    response = await client.get(
+        "/api/v1/users/me/profile",
+        headers={"Authorization": f"Bearer {authenticated_user}"},
+    )
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data["email"] == "user@example.com"
 
 
-async def test_create_user_duplicate_email(client, created_user):
-    r = await client.post("/api/v1/users/", json={
-        "email": "test@example.com",
-        "password": "password123"
-    })
-    assert r.status_code == 400
+@pytest.mark.asyncio
+async def test_update_profile(client, authenticated_user):
+    response = await client.put(
+        "/api/v1/users/me/profile",
+        json={
+            "legal_name": "John Doe",
+            "country": "US",
+        },
+        headers={"Authorization": f"Bearer {authenticated_user}"},
+    )
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data["profile"]["legal_name"] == "John Doe"
+    assert data["profile"]["country"] == "US"
 
 
-async def test_get_user(client, created_user):
-    r = await client.get(f"/api/v1/users/{created_user['id']}")
-    assert r.status_code == 200
-    assert r.json()["id"] == created_user["id"]
-
-
-async def test_get_user_not_found(client):
-    r = await client.get("/api/v1/users/00000000-0000-0000-0000-000000000000")
-    assert r.status_code == 404
-
-
-async def test_list_users(client, created_user):
-    r = await client.get("/api/v1/users/")
-    assert r.status_code == 200
-    data = r.json()
-    assert data["total"] == 1
-    assert len(data["items"]) == 1
-
-
-async def test_update_user(client, created_user):
-    from app.models.user import UserStatus
-    r = await client.patch(f"/api/v1/users/{created_user['id']}", json={
-        "status": UserStatus.active.value
-    })
-    assert r.status_code == 200
-    assert r.json()["status"] == UserStatus.active.value
-
-
-async def test_delete_user(client, created_user):
-    r = await client.delete(f"/api/v1/users/{created_user['id']}")
-    assert r.status_code == 204
-
-    r = await client.get(f"/api/v1/users/{created_user['id']}")
-    assert r.status_code == 404
-
+@pytest.mark.asyncio
+async def test_get_roles(client, authenticated_user):
+    response = await client.get(
+        "/api/v1/users/me/roles",
+        headers={"Authorization": f"Bearer {authenticated_user}"},
+    )
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert data["user_id"] is not None
+    assert data["email"] == "user@example.com"
+    assert data["role"] == "user"
+    assert data["status"] == "pending_email_verification"

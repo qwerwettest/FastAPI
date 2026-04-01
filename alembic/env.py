@@ -1,3 +1,8 @@
+"""
+Alembic migrations environment configuration.
+
+Supports async migrations for PostgreSQL with asyncpg.
+"""
 import asyncio
 from logging.config import fileConfig
 
@@ -10,14 +15,23 @@ from alembic import context
 from app.core.config import settings
 from app.core.database import Base
 
+# Import all models to ensure metadata is populated
 import app.models.user     # noqa: F401
-import app.models.patent   # noqa: F401
-import app.models.analytics  # noqa: F401
-import app.models.common   # noqa: F401
+import app.models.ip_claim  # noqa: F401
+import app.models.audit_log  # noqa: F401
 
+# Configure database URL from settings
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("sqlite:///", "sqlite+aiosqlite:///"))
-DATABASE_URL="postgresql+asyncpg://user:password@localhost:5432/dbname"
+
+# Override sqlalchemy.url with settings.DATABASE_URL
+# Convert sqlite:/// to sqlite+aiosqlite:/// for async support
+db_url = settings.DATABASE_URL
+if db_url.startswith("sqlite:///"):
+    db_url = db_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+elif db_url.startswith("postgresql://"):
+    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+config.set_main_option("sqlalchemy.url", db_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -26,6 +40,7 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
+    """Run migrations in 'offline' mode."""
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -38,12 +53,14 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
+    """Run migrations with async connection."""
     context.configure(connection=connection, target_metadata=target_metadata)
     with context.begin_transaction():
         context.run_migrations()
 
 
 async def run_async_migrations() -> None:
+    """Run migrations in 'online' mode with async engine."""
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
@@ -55,6 +72,7 @@ async def run_async_migrations() -> None:
 
 
 def run_migrations_online() -> None:
+    """Run migrations in 'online' mode."""
     asyncio.run(run_async_migrations())
 
 
