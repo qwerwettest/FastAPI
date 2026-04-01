@@ -1,6 +1,6 @@
 import pytest
 from httpx import AsyncClient, ASGITransport
-from app.main import app
+from main import app
 
 
 @pytest.mark.asyncio
@@ -25,3 +25,4 @@ async def test_ping():
         response = await ac.get("/api/v1/ping")
     assert response.status_code == 200
     assert response.json()["message"] == "pong"
+

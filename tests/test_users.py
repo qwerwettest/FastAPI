@@ -2,7 +2,7 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
-from app.main import app
+from main import app
 from app.core.database import Base, get_db
 
 TEST_DB_URL = "sqlite+aiosqlite:///./test.db"
@@ -108,3 +108,4 @@ async def test_delete_user(client, created_user):
 
     r = await client.get(f"/api/v1/users/{created_user['id']}")
     assert r.status_code == 404
+

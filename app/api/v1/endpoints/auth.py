@@ -3,9 +3,14 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import create_access_token, get_current_user
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    get_current_user,
+)
 from app.models.user import User, UserStatus
-from app.schemas.auth import Token
+from app.schemas.auth import RefreshTokenRequest, Token
 from app.schemas.user import UserRead
 from app.services.user_service import UserService
 
@@ -31,7 +36,31 @@ async def login_for_access_token(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Пользователь недоступен")
 
     access_token = create_access_token(subject=user.email)
-    return Token(access_token=access_token)
+    refresh_token = create_refresh_token(subject=user.email)
+    return Token(access_token=access_token, refresh_token=refresh_token)
+
+
+@router.post("/refresh", response_model=Token)
+async def refresh_access_token(
+    payload: RefreshTokenRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    token_payload = decode_token(payload.refresh_token, expected_type="refresh")
+    user = await UserService.get_by_email(db, token_payload["sub"])
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Не удалось проверить учетные данные",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if user.status in {UserStatus.suspended.value, UserStatus.blocked.value}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Пользователь недоступен")
+
+    return Token(
+        access_token=create_access_token(subject=user.email),
+        refresh_token=create_refresh_token(subject=user.email),
+    )
 
 
 @router.get("/me", response_model=UserRead)
