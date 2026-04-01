@@ -45,6 +45,15 @@ class UserService:
         result = await db.execute(select(User).where(User.email == email.lower().strip()))
         return result.scalar_one_or_none()
 
+    @classmethod
+    async def authenticate(cls, db: AsyncSession, email: str, password: str) -> Optional[User]:
+        user = await cls.get_by_email(db, email)
+        if not user or not user.password_hash:
+            return None
+        if not cls.verify_password(password, user.password_hash):
+            return None
+        return user
+
     @staticmethod
     async def get_all(db: AsyncSession, skip: int = 0, limit: int = 20):
         total_result = await db.execute(select(func.count()).select_from(User))
