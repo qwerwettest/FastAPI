@@ -42,7 +42,6 @@ async def client():
 async def created_user(client):
     response = await client.post("/api/v1/users/", json={
         "email": "test@example.com",
-        "username": "testuser",
         "password": "password123"
     })
     return response.json()
@@ -57,20 +56,19 @@ async def test_root(client):
 async def test_create_user(client):
     r = await client.post("/api/v1/users/", json={
         "email": "new@example.com",
-        "username": "newuser",
         "password": "password123"
     })
     assert r.status_code == 201
     data = r.json()
     assert data["email"] == "new@example.com"
-    assert data["username"] == "newuser"
-    assert "hashed_password" not in data
+    assert "password_hash" not in data
+    assert "role" in data
+    assert "status" in data
 
 
 async def test_create_user_duplicate_email(client, created_user):
     r = await client.post("/api/v1/users/", json={
         "email": "test@example.com",
-        "username": "other",
         "password": "password123"
     })
     assert r.status_code == 400
@@ -83,7 +81,7 @@ async def test_get_user(client, created_user):
 
 
 async def test_get_user_not_found(client):
-    r = await client.get("/api/v1/users/999")
+    r = await client.get("/api/v1/users/00000000-0000-0000-0000-000000000000")
     assert r.status_code == 404
 
 
@@ -96,11 +94,12 @@ async def test_list_users(client, created_user):
 
 
 async def test_update_user(client, created_user):
+    from app.models.user import UserStatus
     r = await client.patch(f"/api/v1/users/{created_user['id']}", json={
-        "username": "updated_name"
+        "status": UserStatus.active.value
     })
     assert r.status_code == 200
-    assert r.json()["username"] == "updated_name"
+    assert r.json()["status"] == UserStatus.active.value
 
 
 async def test_delete_user(client, created_user):

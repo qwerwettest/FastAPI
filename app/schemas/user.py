@@ -1,24 +1,23 @@
+import uuid
 from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime
 from typing import Optional
 
+from app.models.user import UserRole, UserStatus
+
 
 class UserBase(BaseModel):
     email: EmailStr
-    username: str
 
-    @field_validator("username")
+    @field_validator("email")
     @classmethod
-    def username_alphanumeric(cls, v: str) -> str:
-        if not v.replace("_", "").isalnum():
-            raise ValueError("Имя пользователя может содержать только буквы, цифры и _")
-        if len(v) < 3:
-            raise ValueError("Имя пользователя минимум 3 символа")
-        return v
+    def normalise_email(cls, v: str) -> str:
+        return v.lower().strip()
 
 
 class UserCreate(UserBase):
     password: str
+    role: UserRole = UserRole.user
 
     @field_validator("password")
     @classmethod
@@ -30,14 +29,14 @@ class UserCreate(UserBase):
 
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
-    username: Optional[str] = None
-    is_active: Optional[bool] = None
+    role: Optional[UserRole] = None
+    status: Optional[UserStatus] = None
 
 
 class UserRead(UserBase):
-    id: int
-    is_active: bool
-    is_superuser: bool
+    id: uuid.UUID
+    role: UserRole
+    status: UserStatus
     created_at: datetime
     updated_at: datetime
 

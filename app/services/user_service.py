@@ -1,35 +1,48 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+import hashlib
+import hmac
+import os
+import uuid
 from typing import Optional
+
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
+
+_ITERATIONS = 260_000
+_HASH_ALG = "sha256"
 
 
 class UserService:
 
     @staticmethod
-    def _hash_password(password: str) -> str:
-        # В продакшене использовать passlib:
-        # from passlib.context import CryptContext
-        # pwd_context = CryptContext(schemes=["bcrypt"])
-        # return pwd_context.hash(password)
-        import hashlib
-        return hashlib.sha256(password.encode()).hexdigest()
+    def hash_password(password: str) -> str:
+        salt = os.urandom(16).hex()
+        key = hashlib.pbkdf2_hmac(_HASH_ALG, password.encode(), salt.encode(), _ITERATIONS)
+        return f"pbkdf2_{_HASH_ALG}${_ITERATIONS}${salt}${key.hex()}"
 
     @staticmethod
-    async def get_by_id(db: AsyncSession, user_id: int) -> Optional[User]:
+    def verify_password(plain: str, hashed: str) -> bool:
+        try:
+            _, iterations_and_salt_and_key = hashed.split("$", 1)
+            alg_part, iterations_str, salt, key_hex = hashed.split("$")
+            iterations = int(iterations_str)
+            new_key = hashlib.pbkdf2_hmac(
+                _HASH_ALG, plain.encode(), salt.encode(), iterations
+            )
+            return hmac.compare_digest(new_key.hex(), key_hex)
+        except Exception:
+            return False
+
+    @staticmethod
+    async def get_by_id(db: AsyncSession, user_id: uuid.UUID) -> Optional[User]:
         result = await db.execute(select(User).where(User.id == user_id))
         return result.scalar_one_or_none()
 
     @staticmethod
     async def get_by_email(db: AsyncSession, email: str) -> Optional[User]:
-        result = await db.execute(select(User).where(User.email == email))
-        return result.scalar_one_or_none()
-
-    @staticmethod
-    async def get_by_username(db: AsyncSession, username: str) -> Optional[User]:
-        result = await db.execute(select(User).where(User.username == username))
+        result = await db.execute(select(User).where(User.email == email.lower().strip()))
         return result.scalar_one_or_none()
 
     @staticmethod
@@ -46,8 +59,8 @@ class UserService:
     async def create(cls, db: AsyncSession, data: UserCreate) -> User:
         user = User(
             email=data.email,
-            username=data.username,
-            hashed_password=cls._hash_password(data.password),
+            password_hash=cls.hash_password(data.password),
+            role=data.role,
         )
         db.add(user)
         await db.flush()
