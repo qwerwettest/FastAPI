@@ -150,6 +150,47 @@ async def test_register_returns_tokens(client):
 
 
 @pytest.mark.asyncio
+async def test_register_allows_issuer_role(client):
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "issuer-register@example.com",
+            "password": "password123",
+            "confirm_password": "password123",
+            "role": "issuer",
+        },
+    )
+
+    assert response.status_code == 200
+
+    login = await client.post(
+        "/api/v1/auth/login",
+        data={"username": "issuer-register@example.com", "password": "password123"},
+    )
+    assert login.status_code == 200
+    access_token = login.json()["access_token"]
+
+    me = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {access_token}"})
+    assert me.status_code == 200
+    assert me.json()["role"] == "issuer"
+
+
+@pytest.mark.asyncio
+async def test_register_rejects_admin_role(client):
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "admin-register@example.com",
+            "password": "password123",
+            "confirm_password": "password123",
+            "role": "admin",
+        },
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_logout_revokes_refresh_token(client, created_user):
     login_response = await client.post(
         "/api/v1/auth/login",

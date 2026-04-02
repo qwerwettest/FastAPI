@@ -82,6 +82,7 @@ class UserService:
         db: AsyncSession,
         email: str,
         password: str,
+        role: str,
         legal_name: str | None,
         country: str | None,
         require_email_verification: bool,
@@ -89,6 +90,7 @@ class UserService:
         user = User(
             email=email.lower().strip(),
             password_hash=cls.hash_password(password),
+            role=role,
             status="pending_email_verification" if require_email_verification else "active",
         )
         db.add(user)

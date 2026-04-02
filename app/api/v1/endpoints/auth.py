@@ -13,7 +13,7 @@ from app.core.security import (
     decode_and_validate_token,
     get_current_user,
 )
-from app.models.user import User, UserStatus
+from app.models.user import User, UserRole, UserStatus
 from app.schemas.auth import (
     GenericSuccessResponse,
     LogoutRequest,
@@ -40,6 +40,12 @@ async def register_user(
     if payload.password != payload.confirm_password:
         raise HTTPException(status_code=400, detail="Пароли не совпадают")
 
+    if payload.role not in {UserRole.user, UserRole.issuer}:
+        raise HTTPException(
+            status_code=400,
+            detail="Доступна только регистрация с ролью user или issuer",
+        )
+
     existing = await UserService.get_by_email(db, payload.email)
     if existing:
         raise HTTPException(status_code=400, detail="Email уже занят")
@@ -48,6 +54,7 @@ async def register_user(
         db,
         email=payload.email,
         password=payload.password,
+        role=payload.role,
         legal_name=payload.legal_name,
         country=payload.country,
         require_email_verification=settings.REQUIRE_EMAIL_VERIFICATION,
