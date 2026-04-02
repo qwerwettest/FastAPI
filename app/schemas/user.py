@@ -26,11 +26,25 @@ class UserCreate(UserBase):
             raise ValueError("Пароль минимум 8 символов")
         return v
 
+    @field_validator("role")
+    @classmethod
+    def forbid_privileged_role_creation(cls, v: UserRole) -> UserRole:
+        if v in {UserRole.admin, UserRole.compliance_officer}:
+            raise ValueError("Эта роль назначается только вручную в базе данных")
+        return v
+
 
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     role: Optional[UserRole] = None
     status: Optional[UserStatus] = None
+
+    @field_validator("role")
+    @classmethod
+    def forbid_privileged_role_update(cls, v: Optional[UserRole]) -> Optional[UserRole]:
+        if v in {UserRole.admin, UserRole.compliance_officer}:
+            raise ValueError("Эта роль назначается только вручную в базе данных")
+        return v
 
 
 class UserRead(UserBase):
@@ -46,3 +60,18 @@ class UserRead(UserBase):
 class UserList(BaseModel):
     total: int
     items: list[UserRead]
+
+
+class ProfileRead(BaseModel):
+    legal_name: Optional[str] = None
+    country: Optional[str] = None
+
+
+class ProfileUpdate(BaseModel):
+    legal_name: Optional[str] = None
+    country: Optional[str] = None
+
+
+class RoleStatusSnapshot(BaseModel):
+    role: UserRole
+    status: UserStatus

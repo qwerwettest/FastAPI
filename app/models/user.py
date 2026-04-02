@@ -1,7 +1,7 @@
 import enum
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 
 from sqlalchemy import (
     String, Boolean, DateTime, ForeignKey,
@@ -11,6 +11,10 @@ from sqlalchemy import Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models.ip_claim import IpClaim, IpReview
+    from app.models.patent import Patent
 
 
 def _utcnow() -> datetime:
@@ -104,6 +108,16 @@ class User(Base):
         "Patent",
         foreign_keys="[Patent.owner_user_id]",
         back_populates="owner",
+    )
+    ip_claims: Mapped[List["IpClaim"]] = relationship(
+        "IpClaim",
+        foreign_keys="[IpClaim.issuer_user_id]",
+        back_populates="issuer",
+    )
+    ip_claim_reviews: Mapped[List["IpReview"]] = relationship(
+        "IpReview",
+        foreign_keys="[IpReview.reviewer_id]",
+        back_populates="reviewer",
     )
 
 

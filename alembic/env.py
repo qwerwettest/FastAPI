@@ -14,10 +14,14 @@ import app.models.user     # noqa: F401
 import app.models.patent   # noqa: F401
 import app.models.analytics  # noqa: F401
 import app.models.common   # noqa: F401
+import app.models.ip_claim   # noqa: F401
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("sqlite:///", "sqlite+aiosqlite:///"))
-DATABASE_URL="postgresql+asyncpg://user:password@localhost:5432/dbname"
+database_url = settings.DATABASE_URL
+if database_url.startswith("sqlite:///") and not database_url.startswith("sqlite+aiosqlite:///"):
+    database_url = database_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+config.set_main_option("sqlalchemy.url", database_url)
+
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

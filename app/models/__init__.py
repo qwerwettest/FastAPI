@@ -15,6 +15,14 @@ from app.models.common import (  # noqa: F401
     AuditLog, WebhookEvent,
     WebhookEventStatus,
 )
+from app.models.ip_claim import (  # noqa: F401
+    IpClaim,
+    IpDocument,
+    IpReview,
+    IpClaimStatus,
+    IpReviewDecision,
+    TokenRevocation,
+)
 
 __all__ = [
     # Users domain
@@ -29,4 +37,11 @@ __all__ = [
     # Cross-domain
     "AuditLog", "WebhookEvent",
     "WebhookEventStatus",
+    # IP claims domain
+    "IpClaim",
+    "IpDocument",
+    "IpReview",
+    "IpClaimStatus",
+    "IpReviewDecision",
+    "TokenRevocation",
 ]
