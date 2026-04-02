@@ -69,6 +69,8 @@ class IpClaim(Base):
     source_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     patent_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # JSONB поле для внешних метаданных из патентных API (модуль ip_intel)
+    external_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
@@ -77,6 +79,10 @@ class IpClaim(Base):
     issuer: Mapped["User"] = relationship("User", foreign_keys=[issuer_user_id], back_populates="ip_claims")
     documents: Mapped[List["IpDocument"]] = relationship(back_populates="ip_claim", cascade="all, delete-orphan")
     reviews: Mapped[List["IpReview"]] = relationship(back_populates="ip_claim", cascade="all, delete-orphan")
+    # Связь с кэшем патентов (модуль ip_intel)
+    patent_cache_records: Mapped[List["PatentCache"]] = relationship(
+        "PatentCache", foreign_keys="PatentCache.ip_claim_id", back_populates="ip_claim"
+    )
 
 
 class IpDocument(Base):

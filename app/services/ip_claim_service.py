@@ -60,6 +60,7 @@ class IpClaimService:
         document: UploadFile,
         doc_type: str | None,
     ) -> IpDocument:
+        """Legacy: upload and save document. Use register_document + file_storage instead."""
         upload_dir = Path("uploads") / "ip_claims" / str(claim.id)
         upload_dir.mkdir(parents=True, exist_ok=True)
 
@@ -71,6 +72,26 @@ class IpClaimService:
         record = IpDocument(
             ip_claim_id=claim.id,
             file_url=str(target).replace("\\", "/"),
+            doc_type=doc_type,
+            created_by_user_id=uploader_user_id,
+        )
+        db.add(record)
+        await db.flush()
+        await db.refresh(record)
+        return record
+
+    @staticmethod
+    async def register_document(
+        db: AsyncSession,
+        claim: IpClaim,
+        uploader_user_id: uuid.UUID,
+        file_url: str,
+        doc_type: str | None,
+    ) -> IpDocument:
+        """Register an already-saved document in the database."""
+        record = IpDocument(
+            ip_claim_id=claim.id,
+            file_url=file_url,
             doc_type=doc_type,
             created_by_user_id=uploader_user_id,
         )

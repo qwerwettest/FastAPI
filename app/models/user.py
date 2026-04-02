@@ -34,10 +34,18 @@ class UserRole(str, enum.Enum):
 
 
 class UserStatus(str, enum.Enum):
-    pending_email_verification = "pending_email_verification"
+    pending_otp = "pending_otp"
     active = "active"
     suspended = "suspended"
     blocked = "blocked"
+    rejected = "rejected"
+
+
+class VerificationStatus(str, enum.Enum):
+    not_started = "not_started"
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
 
 
 class KYCCaseStatus(str, enum.Enum):
@@ -88,7 +96,7 @@ class User(Base):
     status: Mapped[str] = mapped_column(
         SAEnum(*[s.value for s in UserStatus], name="user_status"),
         nullable=False,
-        default=UserStatus.pending_email_verification,
+        default=UserStatus.pending_otp,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
@@ -119,6 +127,8 @@ class User(Base):
         foreign_keys="[IpReview.reviewer_id]",
         back_populates="reviewer",
     )
+    otp_codes: Mapped[List["OTPCode"]] = relationship(back_populates="user")
+    verification_cases: Mapped[List["VerificationCase"]] = relationship(back_populates="user")
 
 
 class Profile(Base):
@@ -234,3 +244,65 @@ class WalletLink(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="wallet_links")
+
+
+class OTPCode(Base):
+    """One-time password codes for user verification."""
+    __tablename__ = "otp_codes"
+    __table_args__ = (
+        Index("ix_otp_codes_user_id", "user_id"),
+        Index("ix_otp_codes_code", "code"),
+        Index("ix_otp_codes_expires_at", "expires_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    code: Mapped[str] = mapped_column(String(6), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(50), nullable=False, default="registration")
+    is_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="otp_codes")
+
+
+class VerificationCase(Base):
+    """KYC verification case for patent submitters (human-review pipeline)."""
+    __tablename__ = "verification_cases"
+    __table_args__ = (
+        Index("ix_verification_cases_user_id", "user_id"),
+        Index("ix_verification_cases_status", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    # Patent DB lookup data
+    patent_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    patent_address: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    # User-provided data
+    user_address: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    id_document_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    selfie_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    # Review data
+    status: Mapped[str] = mapped_column(
+        SAEnum(*[s.value for s in VerificationStatus], name="verification_status"),
+        nullable=False,
+        default=VerificationStatus.not_started,
+    )
+    reviewer_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reviewed_by: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    user: Mapped["User"] = relationship(back_populates="verification_cases")

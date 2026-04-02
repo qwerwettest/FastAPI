@@ -1,3 +1,11 @@
+"""IP Claims management endpoints.
+
+Provides:
+- Create, list, get IP claims
+- Document upload
+- Review workflow (admin/compliance_officer)
+"""
+
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -15,6 +23,7 @@ from app.schemas.ip_claim import (
 )
 from app.services.audit_service import AuditService
 from app.services.ip_claim_service import IpClaimService
+from app.services.file_storage import save_ip_claim_document
 
 router = APIRouter()
 
@@ -81,7 +90,15 @@ async def upload_ip_claim_document(
     if claim.issuer_user_id != current_user.id and current_user.role not in {"admin", "compliance_officer"}:
         raise HTTPException(status_code=403, detail="Недостаточно прав")
 
-    uploaded = await IpClaimService.upload_document(db, claim, current_user.id, file, doc_type)
+    file_url = await save_ip_claim_document(claim_id=claim.id, file=file)
+
+    uploaded = await IpClaimService.register_document(
+        db=db,
+        claim=claim,
+        uploader_user_id=current_user.id,
+        file_url=file_url,
+        doc_type=doc_type,
+    )
     return uploaded
 
 

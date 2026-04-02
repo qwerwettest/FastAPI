@@ -1,7 +1,7 @@
 # Import order matters: user models first (referenced by other domains via FK)
 from app.models.user import (  # noqa: F401
-    User, Profile, KYCCase, SanctionCheck, WalletLink,
-    UserRole, UserStatus, KYCCaseStatus, KYCRiskLevel, SanctionCheckStatus,
+    User, Profile, KYCCase, SanctionCheck, WalletLink, OTPCode, VerificationCase,
+    UserRole, UserStatus, KYCCaseStatus, KYCRiskLevel, SanctionCheckStatus, VerificationStatus,
 )
 from app.models.patent import (  # noqa: F401
     Patent, PatentDocument, PatentReview,
@@ -26,8 +26,8 @@ from app.models.ip_claim import (  # noqa: F401
 
 __all__ = [
     # Users domain
-    "User", "Profile", "KYCCase", "SanctionCheck", "WalletLink",
-    "UserRole", "UserStatus", "KYCCaseStatus", "KYCRiskLevel", "SanctionCheckStatus",
+    "User", "Profile", "KYCCase", "SanctionCheck", "WalletLink", "OTPCode", "VerificationCase",
+    "UserRole", "UserStatus", "KYCCaseStatus", "KYCRiskLevel", "SanctionCheckStatus", "VerificationStatus",
     # Patents domain
     "Patent", "PatentDocument", "PatentReview",
     "PatentStatus", "DocumentType", "ReviewDecision",

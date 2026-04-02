@@ -7,21 +7,16 @@ from pydantic import BaseModel, Field
 from app.models.ip_claim import IpClaimStatus, IpReviewDecision
 
 
-class PatentPrecheckRequest(BaseModel):
-    patent_number: str = Field(min_length=3, max_length=100)
-    jurisdiction: Optional[str] = "US"
-    claimed_owner_name: Optional[str] = None
-
-
 class PatentPrecheckResponse(BaseModel):
+    """Legacy precheck response for /ip/precheck endpoint."""
     status: str
     patent_number: str
-    title: Optional[str] = None
-    owner: Optional[str] = None
-    metadata: Optional[dict[str, Any]] = None
-    source_id: Optional[str] = None
+    title: str | None = None
+    owner: str | None = None
+    metadata: dict | None = None
+    source_id: str | None = None
     prechecked: bool
-    message: Optional[str] = None
+    message: str | None = None
 
 
 class CreateIpClaimRequest(BaseModel):
