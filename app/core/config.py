@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
+    EMAIL_VERIFY_TOKEN_EXPIRE_MINUTES: int = 60 * 24
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 30
+    REQUIRE_EMAIL_VERIFICATION: bool = False
 
     ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
 

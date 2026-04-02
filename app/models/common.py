@@ -1,7 +1,7 @@
 import enum
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from sqlalchemy import (
     String, DateTime, ForeignKey,
@@ -11,6 +11,9 @@ from sqlalchemy import Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 
 def _utcnow() -> datetime:

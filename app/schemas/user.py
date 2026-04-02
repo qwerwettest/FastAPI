@@ -46,3 +46,18 @@ class UserRead(UserBase):
 class UserList(BaseModel):
     total: int
     items: list[UserRead]
+
+
+class ProfileRead(BaseModel):
+    legal_name: Optional[str] = None
+    country: Optional[str] = None
+
+
+class ProfileUpdate(BaseModel):
+    legal_name: Optional[str] = None
+    country: Optional[str] = None
+
+
+class RoleStatusSnapshot(BaseModel):
+    role: UserRole
+    status: UserStatus
