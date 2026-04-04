@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python *)",
+      "Bash(pip install *)",
+      "Bash(pip list)",
+      "Bash(findstr *)",
+      "Bash(mkdir *)",
+      "Bash(pytest *)",
+      "Bash(set *)",
+      "Bash(echo.)",
+      "Bash(echo *)",
+      "Bash(make *)",
+      "Bash(.venv\\scripts\\python.exe *)"
+    ]
+  },
+  "$version": 3
+}

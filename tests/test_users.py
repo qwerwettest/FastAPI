@@ -1,111 +1,290 @@
+"""
+Tests for /api/v1/users/* endpoints:
+profile CRUD, document upload, verification status, role guard.
+"""
+from __future__ import annotations
+
+import io
+import uuid
+
 import pytest
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from main import app
-from app.core.database import Base, get_db
-
-TEST_DB_URL = "sqlite+aiosqlite:///./test.db"
-
-test_engine = create_async_engine(TEST_DB_URL, echo=False)
-TestSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+from app.models.user import User, UserRole, UserStatus, VerificationCase, VerificationStatus
+from app.models.common import AuditLog
 
 
-async def override_get_db():
-    async with TestSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
+# ---------------------------------------------------------------------------
+# 1. Profile CRUD
+# ---------------------------------------------------------------------------
+
+async def test_get_my_profile_empty(client: AsyncClient, make_user, auth_headers):
+    """GET /users/profile → 200, empty profile if none exists."""
+    user = await make_user(role="user", status="active")
+    headers = auth_headers(user)
+
+    resp = await client.get("/api/v1/users/profile", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["legal_name"] is None
+    assert data["country"] is None
 
 
-@pytest.fixture(autouse=True)
-async def setup_db():
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    app.dependency_overrides[get_db] = override_get_db
-    yield
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    app.dependency_overrides.clear()
+async def test_update_my_profile(client: AsyncClient, make_user, auth_headers, db_session):
+    """PUT /users/profile → profile created/updated."""
+    user = await make_user(role="user", status="active")
+    headers = auth_headers(user)
+
+    resp = await client.put(
+        "/api/v1/users/profile",
+        headers=headers,
+        json={"legal_name": "John Doe", "country": "US"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["legal_name"] == "John Doe"
+    assert data["country"] == "US"
+
+    # Verify persistence
+    resp = await client.get("/api/v1/users/profile", headers=headers)
+    assert resp.json()["legal_name"] == "John Doe"
 
 
-@pytest.fixture
-async def client():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        yield ac
+async def test_update_profile_partial(client: AsyncClient, make_user, auth_headers):
+    """PUT /users/profile → partial update (only country)."""
+    user = await make_user(role="user", status="active")
+    headers = auth_headers(user)
+
+    # First set both fields
+    await client.put(
+        "/api/v1/users/profile",
+        headers=headers,
+        json={"legal_name": "John", "country": "US"},
+    )
+
+    # Partial update
+    resp = await client.put(
+        "/api/v1/users/profile",
+        headers=headers,
+        json={"country": "GB"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["country"] == "GB"
 
 
-@pytest.fixture
-async def created_user(client):
-    response = await client.post("/api/v1/users/", json={
-        "email": "test@example.com",
-        "password": "password123"
-    })
-    return response.json()
+async def test_profile_requires_auth(client: AsyncClient):
+    """GET /users/profile → 401 without token."""
+    resp = await client.get("/api/v1/users/profile")
+    assert resp.status_code == 401
 
 
-async def test_root(client):
-    r = await client.get("/")
-    assert r.status_code == 200
-    assert r.json()["status"] == "ok"
+# ---------------------------------------------------------------------------
+# 2. Verification Documents Upload
+# ---------------------------------------------------------------------------
+
+async def test_submit_verification_documents(client: AsyncClient, make_user, auth_headers):
+    """POST /users/verification/documents → 201, verification case created."""
+    user = await make_user(role="user", status="active")
+    headers = auth_headers(user)
+
+    files = {
+        "id_document": ("id.png", io.BytesIO(b"fake-id-data"), "image/png"),
+        "selfie": ("selfie.png", io.BytesIO(b"fake-selfie-data"), "image/png"),
+    }
+    data = {"user_address": "123 Main St"}
+
+    resp = await client.post(
+        "/api/v1/users/verification/documents",
+        headers=headers,
+        files=files,
+        data=data,
+    )
+    assert resp.status_code == 201
+    vc = resp.json()
+    assert vc["status"] == VerificationStatus.pending.value
+    assert vc["user_address"] == "123 Main St"
 
 
-async def test_create_user(client):
-    r = await client.post("/api/v1/users/", json={
-        "email": "new@example.com",
-        "password": "password123"
-    })
-    assert r.status_code == 201
-    data = r.json()
-    assert data["email"] == "new@example.com"
-    assert "password_hash" not in data
-    assert "role" in data
-    assert "status" in data
+async def test_submit_verification_documents_wrong_role(client: AsyncClient, make_user, auth_headers):
+    """POST /users/verification/documents → 400 for non-submitter role."""
+    user = await make_user(role="investor", status="active")
+    headers = auth_headers(user)
+
+    files = {
+        "id_document": ("id.png", io.BytesIO(b"data"), "image/png"),
+        "selfie": ("selfie.png", io.BytesIO(b"data"), "image/png"),
+    }
+    resp = await client.post(
+        "/api/v1/users/verification/documents",
+        headers=headers,
+        files=files,
+        data={"user_address": "123 Main St"},
+    )
+    assert resp.status_code == 400
 
 
-async def test_create_user_duplicate_email(client, created_user):
-    r = await client.post("/api/v1/users/", json={
-        "email": "test@example.com",
-        "password": "password123"
-    })
-    assert r.status_code == 400
+async def test_verification_status(client: AsyncClient, make_user, auth_headers, db_session):
+    """GET /users/verification/status → returns latest case."""
+    user = await make_user(role="user", status="active")
+    headers = auth_headers(user)
+
+    # No case yet → 404
+    resp = await client.get("/api/v1/users/verification/status", headers=headers)
+    assert resp.status_code == 404
+
+    # Create case
+    files = {
+        "id_document": ("id.png", io.BytesIO(b"data"), "image/png"),
+        "selfie": ("selfie.png", io.BytesIO(b"data"), "image/png"),
+    }
+    await client.post(
+        "/api/v1/users/verification/documents",
+        headers=headers,
+        files=files,
+        data={"user_address": "123 Main St"},
+    )
+
+    # Check status
+    resp = await client.get("/api/v1/users/verification/status", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == VerificationStatus.pending.value
 
 
-async def test_get_user(client, created_user):
-    r = await client.get(f"/api/v1/users/{created_user['id']}")
-    assert r.status_code == 200
-    assert r.json()["id"] == created_user["id"]
+# ---------------------------------------------------------------------------
+# 3. Verification Review (Role Guard)
+# ---------------------------------------------------------------------------
+
+async def test_review_verification_approve(
+    client: AsyncClient, make_user, auth_headers, db_session
+):
+    """POST /users/verification/review/{id} → approved, user status updated."""
+    submitter = await make_user(role="user", status="active")
+    admin = await make_user(role="admin", status="active")
+
+    # Create verification case
+    sub_headers = auth_headers(submitter)
+    files = {
+        "id_document": ("id.png", io.BytesIO(b"data"), "image/png"),
+        "selfie": ("selfie.png", io.BytesIO(b"data"), "image/png"),
+    }
+    resp = await client.post(
+        "/api/v1/users/verification/documents",
+        headers=sub_headers,
+        files=files,
+        data={"user_address": "123 Main St"},
+    )
+    case_id = resp.json()["id"]
+
+    # Admin reviews
+    admin_headers = auth_headers(admin)
+    resp = await client.post(
+        f"/api/v1/users/verification/review/{case_id}",
+        headers=admin_headers,
+        data={"decision": "approved", "notes": "Looks good"},
+    )
+    assert resp.status_code == 200
+    vc = resp.json()
+    assert vc["status"] == VerificationStatus.approved.value
+
+    # User status changed to active
+    await db_session.refresh(submitter)
+    assert submitter.status == UserStatus.active.value
 
 
-async def test_get_user_not_found(client):
-    r = await client.get("/api/v1/users/00000000-0000-0000-0000-000000000000")
-    assert r.status_code == 404
+async def test_review_verification_reject(
+    client: AsyncClient, make_user, auth_headers, db_session
+):
+    """POST /users/verification/review/{id} → rejected, user status updated."""
+    submitter = await make_user(role="user", status="active")
+    admin = await make_user(role="admin", status="active")
+
+    sub_headers = auth_headers(submitter)
+    files = {
+        "id_document": ("id.png", io.BytesIO(b"data"), "image/png"),
+        "selfie": ("selfie.png", io.BytesIO(b"data"), "image/png"),
+    }
+    resp = await client.post(
+        "/api/v1/users/verification/documents",
+        headers=sub_headers,
+        files=files,
+        data={"user_address": "123 Main St"},
+    )
+    case_id = resp.json()["id"]
+
+    admin_headers = auth_headers(admin)
+    resp = await client.post(
+        f"/api/v1/users/verification/review/{case_id}",
+        headers=admin_headers,
+        data={"decision": "rejected", "notes": "Documents unclear"},
+    )
+    assert resp.status_code == 200
+    vc = resp.json()
+    assert vc["status"] == VerificationStatus.rejected.value
+
+    await db_session.refresh(submitter)
+    assert submitter.status == UserStatus.rejected.value
 
 
-async def test_list_users(client, created_user):
-    r = await client.get("/api/v1/users/")
-    assert r.status_code == 200
-    data = r.json()
-    assert data["total"] == 1
-    assert len(data["items"]) == 1
+async def test_review_verification_forbidden_for_regular_user(
+    client: AsyncClient, make_user, auth_headers, db_session
+):
+    """POST /users/verification/review/{id} → 403 for non-admin user."""
+    submitter = await make_user(role="user", status="active")
+    regular = await make_user(role="user", status="active")
+
+    sub_headers = auth_headers(submitter)
+    files = {
+        "id_document": ("id.png", io.BytesIO(b"data"), "image/png"),
+        "selfie": ("selfie.png", io.BytesIO(b"data"), "image/png"),
+    }
+    resp = await client.post(
+        "/api/v1/users/verification/documents",
+        headers=sub_headers,
+        files=files,
+        data={"user_address": "123 Main St"},
+    )
+    case_id = resp.json()["id"]
+
+    regular_headers = auth_headers(regular)
+    resp = await client.post(
+        f"/api/v1/users/verification/review/{case_id}",
+        headers=regular_headers,
+        data={"decision": "approved", "notes": ""},
+    )
+    assert resp.status_code == 403
 
 
-async def test_update_user(client, created_user):
-    from app.models.user import UserStatus
-    r = await client.patch(f"/api/v1/users/{created_user['id']}", json={
-        "status": UserStatus.active.value
-    })
-    assert r.status_code == 200
-    assert r.json()["status"] == UserStatus.active.value
+# ---------------------------------------------------------------------------
+# 4. Duplicate Verification Case
+# ---------------------------------------------------------------------------
 
+async def test_cannot_submit_verification_when_pending(
+    client: AsyncClient, make_user, auth_headers, db_session
+):
+    """POST /users/verification/documents → 400 if case already pending."""
+    user = await make_user(role="user", status="active")
+    headers = auth_headers(user)
 
-async def test_delete_user(client, created_user):
-    r = await client.delete(f"/api/v1/users/{created_user['id']}")
-    assert r.status_code == 204
+    files = {
+        "id_document": ("id.png", io.BytesIO(b"data"), "image/png"),
+        "selfie": ("selfie.png", io.BytesIO(b"data"), "image/png"),
+    }
+    # First submission
+    await client.post(
+        "/api/v1/users/verification/documents",
+        headers=headers,
+        files=files,
+        data={"user_address": "123 Main St"},
+    )
 
-    r = await client.get(f"/api/v1/users/{created_user['id']}")
-    assert r.status_code == 404
-
+    # Second submission → 400
+    resp = await client.post(
+        "/api/v1/users/verification/documents",
+        headers=headers,
+        files=files,
+        data={"user_address": "456 Other St"},
+    )
+    assert resp.status_code == 400

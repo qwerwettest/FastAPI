@@ -1,80 +1,26 @@
+"""User management endpoints.
+
+Provides:
+- Profile CRUD (get/update)
+- Verification case submission, status check, and review
+"""
+
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_user
-from app.models.user import User
-from app.schemas.user import (
-    ProfileRead,
-    ProfileUpdate,
-    RoleStatusSnapshot,
-    UserCreate,
-    UserList,
-    UserRead,
-    UserUpdate,
-)
+from app.core.security import get_current_user, require_roles
+from app.models.user import User, VerificationStatus
+from app.schemas.user import ProfileRead, ProfileUpdate, VerificationCaseRead
 from app.services.user_service import UserService
+from app.services.file_storage import save_verification_documents
 
 router = APIRouter()
 
 
-@router.get("/", response_model=UserList, deprecated=True)
-async def list_users(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db),
-):
-    total, users = await UserService.get_all(db, skip=skip, limit=limit)
-    return UserList(total=total, items=users)
-
-
-@router.post("/", response_model=UserRead, status_code=status.HTTP_201_CREATED, deprecated=True)
-async def create_user(
-    data: UserCreate,
-    db: AsyncSession = Depends(get_db),
-):
-    if await UserService.get_by_email(db, data.email):
-        raise HTTPException(status_code=400, detail="Email уже занят")
-    return await UserService.create(db, data)
-
-
-@router.get("/{user_id}", response_model=UserRead, deprecated=True)
-async def get_user(
-    user_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-):
-    user = await UserService.get_by_id(db, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    return user
-
-
-@router.patch("/{user_id}", response_model=UserRead, deprecated=True)
-async def update_user(
-    user_id: uuid.UUID,
-    data: UserUpdate,
-    db: AsyncSession = Depends(get_db),
-):
-    user = await UserService.get_by_id(db, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    return await UserService.update(db, user, data)
-
-
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT, deprecated=True)
-async def delete_user(
-    user_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-):
-    user = await UserService.get_by_id(db, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    await UserService.delete(db, user)
-
-
-@router.get("/me/profile", response_model=ProfileRead)
+@router.get("/profile", response_model=ProfileRead)
 async def get_my_profile(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -85,7 +31,7 @@ async def get_my_profile(
     return ProfileRead(legal_name=profile.full_name, country=profile.country)
 
 
-@router.put("/me/profile", response_model=ProfileRead)
+@router.put("/profile", response_model=ProfileRead)
 async def update_my_profile(
     payload: ProfileUpdate,
     current_user: User = Depends(get_current_user),
@@ -95,8 +41,99 @@ async def update_my_profile(
     return ProfileRead(legal_name=profile.full_name, country=profile.country)
 
 
-@router.get("/me/roles", response_model=RoleStatusSnapshot)
-async def get_my_roles(
+# --- Verification case endpoints ---
+
+
+@router.post("/verification/documents", response_model=VerificationCaseRead, status_code=201)
+async def submit_verification_documents(
+    id_document: UploadFile = File(...),
+    selfie: UploadFile = File(...),
+    user_address: str = Form(...),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    return RoleStatusSnapshot(role=current_user.role, status=current_user.status)
+    """Step 2 — Document Collection: upload ID, selfie, and provide address."""
+    if current_user.role not in {"user", "issuer"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Верификация доступна только для patent submitter",
+        )
+
+    existing_vc = await UserService.get_latest_verification_case(db, current_user.id)
+
+    if existing_vc and existing_vc.status in {
+        VerificationStatus.pending.value,
+        VerificationStatus.approved.value,
+    }:
+        raise HTTPException(
+            status_code=400,
+            detail="Верификация уже в процессе или одобрена",
+        )
+
+    id_doc_path, selfie_path = await save_verification_documents(
+        user_id=current_user.id,
+        id_document=id_document,
+        selfie=selfie,
+    )
+
+    if existing_vc and existing_vc.status == VerificationStatus.rejected.value:
+        existing_vc.id_document_url = id_doc_path
+        existing_vc.selfie_url = selfie_path
+        existing_vc.user_address = user_address
+        existing_vc.status = VerificationStatus.pending.value
+        await db.flush()
+        await db.refresh(existing_vc)
+        return existing_vc
+
+    vc = await UserService.create_verification_case(
+        db=db,
+        user_id=current_user.id,
+        id_document_url=id_doc_path,
+        selfie_url=selfie_path,
+        user_address=user_address,
+    )
+    return vc
+
+
+@router.get("/verification/status", response_model=VerificationCaseRead)
+async def get_verification_status(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Check current verification status."""
+    vc = await UserService.get_latest_verification_case(db, current_user.id)
+    if not vc:
+        raise HTTPException(status_code=404, detail="Верификация не найдена")
+    return vc
+
+
+@router.post("/verification/review/{case_id}", response_model=VerificationCaseRead)
+async def review_verification(
+    case_id: uuid.UUID,
+    decision: str = Form(...),
+    notes: str = Form(None),
+    reviewer: User = Depends(require_roles("admin", "compliance_officer")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Step 3 — Human Review: approve or reject verification case."""
+    vc = await UserService.get_latest_verification_case(db, case_id)
+    # get_latest_verification_case searches by user_id, but case_id is the VC id
+    # Need to query by id instead
+    from sqlalchemy import select
+    from app.models.user import VerificationCase
+
+    stmt = select(VerificationCase).where(VerificationCase.id == case_id)
+    result = await db.execute(stmt)
+    vc = result.scalar_one_or_none()
+
+    if not vc:
+        raise HTTPException(status_code=404, detail="Верификация не найдена")
+
+    updated_vc = await UserService.review_verification_case(
+        db=db,
+        case=vc,
+        reviewer_id=reviewer.id,
+        decision=decision,
+        notes=notes,
+    )
+    return updated_vc
